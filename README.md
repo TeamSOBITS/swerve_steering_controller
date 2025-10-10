@@ -1,6 +1,6 @@
-# zinger_swerve_controller
+# Swerve Steering Controller for ROS 2
 
-Provides the swerve controller code for the zinger robot.
+Provides the swerve controller code.
 
 ## Dependencies
 
@@ -13,10 +13,6 @@ robot using Raspberry Pi OS.
    [ros_control](https://control.ros.org/master/index.html) packages.
 1. A working [ROS workspace](https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Creating-A-Workspace/Creating-A-Workspace.html).
 
-Also the following packages should be present:
-
-1. [zinger_description](https://github.com/pvandervelde/zinger_description) - Contains the geometric
-  description of the Zinger robot for ROS to work with.
 
 ## Contents
 
@@ -27,25 +23,25 @@ This repository contains different folders for the different parts of the robot 
 * The launch directory contains the launch files
   * [launch/swerve_controller.launch.py](launch/swerve_controller.launch.py) - Launches the controller node.
 * The source code for the swerve controller
-  * [zinger_swerve_controller/control_model.py](zinger_swerve_controller/control_model.py) - Defines the inverse and forward
+  * [swerve_steering_controller/control_model.py](swerve_steering_controller/control_model.py) - Defines the inverse and forward
     kinematics.
-  * [zinger_swerve_controller/control_profile.py](zinger_swerve_controller/control_profile.py) - Defines the body and module
+  * [swerve_steering_controller/control_profile.py](swerve_steering_controller/control_profile.py) - Defines the body and module
     motion profiles.
-  * [zinger_swerve_controller/control.py](zinger_swerve_controller/control.py) - Defines the different motion control commands
+  * [swerve_steering_controller/control.py](swerve_steering_controller/control.py) - Defines the different motion control commands
     that can be specified.
-  * [zinger_swerve_controller/drive_module.py](zinger_swerve_controller/drive_module.py) - Defines the properties for a
+  * [swerve_steering_controller/drive_module.py](swerve_steering_controller/drive_module.py) - Defines the properties for a
     drive module.
-  * [zinger_swerve_controller/errors.py](zinger_swerve_controller/errors.py) - Defines custom errors.
-  * [zinger_swerve_controller/geometry.py](zinger_swerve_controller/geometry.py) - Defines standard geometry elements.
-  * [zinger_swerve_controller/profile.py](zinger_swerve_controller/profile.py) - Defines the motion control
+  * [swerve_steering_controller/errors.py](swerve_steering_controller/errors.py) - Defines custom errors.
+  * [swerve_steering_controller/geometry.py](swerve_steering_controller/geometry.py) - Defines standard geometry elements.
+  * [swerve_steering_controller/profile.py](swerve_steering_controller/profile.py) - Defines the motion control
     profile that describes how the steering angle and the drive velocity change over time when they are changed from an
     initial value to a target value. The only current implementation is the s-curve motion profile.
-  * [zinger_swerve_controller/states.py](zinger_swerve_controller/states.py) - Defines the data structures used to contain
+  * [swerve_steering_controller/states.py](swerve_steering_controller/states.py) - Defines the data structures used to contain
     information about the current motion states.
-  * [zinger_swerve_controller/steering_controller.py](zinger_swerve_controller/steering_controller.py) - Responsible
+  * [swerve_steering_controller/steering_controller.py](swerve_steering_controller/steering_controller.py) - Responsible
     for calculating the steering angles and drive velocities of the modules based on the initial state and the
     desired final state.
-  * [zinger_swerve_controller/swerve_controller.py](zinger_swerve_controller/swerve_controller.py) - The
+  * [swerve_steering_controller/swerve_controller.py](swerve_steering_controller/swerve_controller.py) - The
     controller that sends the control commands to the different joints in the drive modules. Additionally sends
     the odometry messages.
 
@@ -53,7 +49,7 @@ This repository contains different folders for the different parts of the robot 
 
 ### Models
 
-The [model](zinger_swerve_controller/control_model.py) describes the inverse and forward kinematics. There are many different
+The [model](swerve_steering_controller/control_model.py) describes the inverse and forward kinematics. There are many different
 algorithms available in the literature. At the moment the following algorithms are implemented:
 
 * A [simple kinematics model](https://www.chiefdelphi.com/t/paper-4-wheel-independent-drive-independent-steering-swerve/107383/5)
@@ -151,7 +147,7 @@ of `|A|` which provides a least-squares fit of the values to the available varia
 
 ### Controllers
 
-The [controller](zinger_swerve_controller/multi_wheel_steering_controller.py) is responsible for planning the profile that each
+The [controller](swerve_steering_controller/multi_wheel_steering_controller.py) is responsible for planning the profile that each
 drive module should follow to move the robot from the current movement state to the desired movement state. Currently
 the following controllers are implemented:
 
@@ -162,11 +158,11 @@ In the future the aim is to implement additional controllers that use control pr
 
 ## Usage
 
-The `zinger_swerve_controller` package can be launched by using one of the two following command lines. The first
+The `swerve_steering_controller` package can be launched by using one of the two following command lines. The first
 command line is for use when running the robot in the Gazebo simulator
 
-    ros2 launch zinger_swerve_controller swerve_controller.launch.py use_sim_time:=true
+    ros2 launch swerve_steering_controller swerve_controller.launch.py use_sim_time:=true
 
 When using the controller on a physical robot use
 
-    ros2 launch zinger_swerve_controller swerve_controller.launch.py
+    ros2 launch swerve_steering_controller swerve_controller.launch.py

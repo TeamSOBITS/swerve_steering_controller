@@ -1,10 +1,11 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>zinger_swerve_controller</name>
+  <name>swerve_steering_controller</name>
   <version>0.1.0</version>
-  <description>The swerve drive controller for the Zinger robot.</description>
+  <description>The swerve drive controller for ROS 2.</description>
   <maintainer email="petrikvandervelde@gmail.com">petrik</maintainer>
+  <maintainer email="kvalentincardenas@hotmail.com">Keith Valentin</maintainer>
   <license>Apache-2.0</license>
 
   <!-- Messages -->
