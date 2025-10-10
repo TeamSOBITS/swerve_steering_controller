@@ -90,7 +90,7 @@ class SwerveController(Node):
         )
 
         # publish odometry
-        odom_topic = "/odom"
+        odom_topic = "odom"
         self.odometry_publisher = self.create_publisher(
             Odometry,
             odom_topic,
@@ -109,7 +109,7 @@ class SwerveController(Node):
         # Initialize odom TF 
         zero_odometry = Odometry()
         zero_odometry.header.stamp = self.get_clock().now().to_msg()
-        zero_odometry.header.frame_id = "odom"
+        zero_odometry.header.frame_id = "sobit_home/odom"
         zero_odometry.child_frame_id = self.robot_base_link
         zero_odometry.pose.pose.position.x = 0.0
         zero_odometry.pose.pose.position.y = 0.0
@@ -149,7 +149,8 @@ class SwerveController(Node):
             1.0 / self.cycle_time_in_hertz,
             self.timer_callback,
             callback_group=None,
-            clock=self.get_clock())
+            clock=self.get_clock()
+        )
         self.i = 0
 
         # Listen for state changes in the drive modules
@@ -259,12 +260,13 @@ class SwerveController(Node):
             )
 
         drive_modules: List[DriveModule] = []
-        drive_module_name = "left_front"
+        drive_module_name = "f_l"  # TODO: parameterize this
         left_front = DriveModule(
             name=drive_module_name,
             steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
             drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            steering_axis_xy_position=Point(0.5 * (robot_length - 2 * steering_radius), 0.5 * (robot_width - steering_radius), 0.0),
+            # steering_axis_xy_position=Point(0.5 * (robot_length - 2 * steering_radius), 0.5 * (robot_width - steering_radius), 0.0),
+            steering_axis_xy_position=Point(0.35355339/2, 0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
             wheel_radius=wheel_radius,
             wheel_width=wheel_width,
             steering_motor_maximum_velocity=10.0,
@@ -283,12 +285,13 @@ class SwerveController(Node):
             f'and position: ["{left_front.steering_axis_xy_position.x}", "{left_front.steering_axis_xy_position.y}"]'
         )
 
-        drive_module_name = "left_rear"
+        drive_module_name = "b_l"  # TODO: parameterize this
         left_rear = DriveModule(
             name=drive_module_name,
             steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
             drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            steering_axis_xy_position=Point(-0.5 * (robot_length - 2 * steering_radius), 0.5 * (robot_width - steering_radius), 0.0),
+            # steering_axis_xy_position=Point(-0.5 * (robot_length - 2 * steering_radius), 0.5 * (robot_width - steering_radius), 0.0),
+            steering_axis_xy_position=Point(-0.35355339/2, 0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
             wheel_radius=wheel_radius,
             wheel_width=wheel_width,
             steering_motor_maximum_velocity=10.0,
@@ -307,12 +310,13 @@ class SwerveController(Node):
             f'and position: ["{left_rear.steering_axis_xy_position.x}", "{left_rear.steering_axis_xy_position.y}"]'
         )
 
-        drive_module_name = "right_rear"
+        drive_module_name = "b_r"  # TODO: parameterize this
         right_rear = DriveModule(
             name=drive_module_name,
             steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
             drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            steering_axis_xy_position=Point(-0.5 * (robot_length - 2 * steering_radius), -0.5 * (robot_width - steering_radius), 0.0),
+            # steering_axis_xy_position=Point(-0.5 * (robot_length - 2 * steering_radius), -0.5 * (robot_width - steering_radius), 0.0),
+            steering_axis_xy_position=Point(-0.35355339/2, -0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
             wheel_radius=wheel_radius,
             wheel_width=wheel_width,
             steering_motor_maximum_velocity=10.0,
@@ -331,12 +335,13 @@ class SwerveController(Node):
             f'and position: ["{right_rear.steering_axis_xy_position.x}", "{right_rear.steering_axis_xy_position.y}"]'
         )
 
-        drive_module_name = "right_front"
+        drive_module_name = "f_r"  # TODO: parameterize this
         right_front = DriveModule(
             name=drive_module_name,
             steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
             drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            steering_axis_xy_position=Point(0.5 * (robot_length - 2 * steering_radius), -0.5 * (robot_width - steering_radius), 0.0),
+            # steering_axis_xy_position=Point(0.5 * (robot_length - 2 * steering_radius), -0.5 * (robot_width - steering_radius), 0.0),
+            steering_axis_xy_position=Point(0.35355339/2, -0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
             wheel_radius=wheel_radius,
             wheel_width=wheel_width,
             steering_motor_maximum_velocity=10.0,
@@ -453,7 +458,7 @@ class SwerveController(Node):
 
         msg = Odometry()
         msg.header.stamp = self.last_recorded_time.to_msg()
-        msg.header.frame_id = "odom"
+        msg.header.frame_id = "sobit_home/odom"
         msg.child_frame_id = self.robot_base_link
         msg.pose.pose.position.x = body_state.position_in_world_coordinates.x
         msg.pose.pose.position.y = body_state.position_in_world_coordinates.y
@@ -486,7 +491,7 @@ class SwerveController(Node):
     def send_odom_transform(self, odometry_msg: Odometry):
         transform = TransformStamped()
         transform.header.stamp = odometry_msg.header.stamp
-        transform.header.frame_id = "odom"
+        transform.header.frame_id = "sobit_home/odom"
         transform.child_frame_id = self.robot_base_link
         transform.transform.translation.x = odometry_msg.pose.pose.position.x
         transform.transform.translation.y = odometry_msg.pose.pose.position.y
@@ -501,7 +506,7 @@ class SwerveController(Node):
         tf_static_broadcaster = StaticTransformBroadcaster(self)
         transform = TransformStamped()
         transform.header.stamp = self.get_clock().now().to_msg()
-        transform.header.frame_id = "odom"
+        transform.header.frame_id = "sobit_home/odom"
         transform.child_frame_id = self.robot_base_link
         transform.transform.translation.x = 0.0
         transform.transform.translation.y = 0.0
