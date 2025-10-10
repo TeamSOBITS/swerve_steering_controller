@@ -11,42 +11,45 @@
 # limitations under the License.
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.substitutions.launch_configuration import LaunchConfiguration
 
-ARGUMENTS = [
-    DeclareLaunchArgument(
-        'use_sim_time',
-        default_value='false',
-        choices=['true', 'false'],
-        description='use_sim_time'
-    ),
-]
-
 def generate_launch_description():
+    arg_robot_name = DeclareLaunchArgument('robot_name', default_value='sobit_home')
+    arg_enable_gz  = DeclareLaunchArgument('enable_gz', default_value='True')
+
+    return LaunchDescription([
+        arg_robot_name,
+        arg_enable_gz,
+        OpaqueFunction(function = launch_gz),
+    ])
+
+
+def launch_gz(context, *args, **kwargs):
+    robot_name = LaunchConfiguration('robot_name').perform(context)
+    enable_gz  = LaunchConfiguration('enable_gz').perform(context)
 
     config = PathJoinSubstitution(
         [
-            FindPackageShare("zinger_swerve_controller"),
+            FindPackageShare("swerve_steering_controller"),
             "config",
             "swerve.yaml",
         ]
     )
 
-    return LaunchDescription(
-        [
-            Node(
-                package="zinger_swerve_controller",
-                executable="swerve_controller",
-                name="swerve_controller",
-                parameters=[
-                    {'use_sim_time': LaunchConfiguration('use_sim_time')},
-                    config
-                ],
-                output="both",
-            )
-        ]
-    )
+    return [
+        Node(
+            package="swerve_steering_controller",
+            executable="swerve_controller",
+            name="swerve_controller",
+            namespace=robot_name,
+            parameters=[
+                {'use_sim_time': enable_gz},
+                config
+            ],
+            output="both",
+        )
+    ]
