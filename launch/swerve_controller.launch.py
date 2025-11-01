@@ -40,6 +40,9 @@ def launch_gz(context, *args, **kwargs):
         ]
     )
 
+    # convert enable_gz string to boolean for use_sim_time
+    use_sim_time = str(enable_gz).lower() in ['true', '1', 'yes']
+
     return [
         Node(
             package="swerve_steering_controller",
@@ -47,7 +50,7 @@ def launch_gz(context, *args, **kwargs):
             name="swerve_controller",
             namespace=robot_name,
             parameters=[
-                {'use_sim_time': enable_gz},
+                {'use_sim_time': use_sim_time},
                 config
             ],
             output="both",
