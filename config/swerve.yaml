@@ -1,12 +1,12 @@
 /**/swerve_controller:
   ros__parameters:
 
-    robot_base_frame: sobit_home/base_footprint
+    robot_base_frame: base_footprint
 
-    twist_topic: /sobit_home/cmd_vel
+    twist_topic: cmd_vel
 
-    position_controller_name: "sobit_home/wheel_steer_position_controller"
-    velocity_controller_name: "sobit_home/wheel_drive_velocity_controller"
+    position_controller_name: "wheel_steer_position_controller"
+    velocity_controller_name: "wheel_drive_velocity_controller"
 
     cycle_fequency: 50
 
