@@ -51,15 +51,43 @@ class SwerveController(Node):
         self.declare_parameter("steering_joints", ["joint1", "joint2"])
         self.declare_parameter("drive_joints", ["joint1", "joint2"])
 
+        self.declare_parameter("mobile_base.wheel_radius", 0.04)
+        self.declare_parameter("mobile_base.wheel_width", 0.08)
+        self.declare_parameter("mobile_base.wheel_x_distance", 0.35)
+        self.declare_parameter("mobile_base.wheel_y_distance", 0.35)
+        self.declare_parameter("mobile_base.steer_max_vel", 10.0)
+        self.declare_parameter("mobile_base.steer_min_acc", 0.1)
+        self.declare_parameter("mobile_base.steer_max_acc", 1.0)
+        self.declare_parameter("mobile_base.drive_max_vel", 10.0)
+        self.declare_parameter("mobile_base.drive_min_acc", 0.1)
+        self.declare_parameter("mobile_base.drive_max_acc", 1.0)
+
         self.get_logger().info(f'Initializing swerve controller ...')
 
         self.last_velocity_command: Twist = None
 
+        self.node_namespace = self.get_namespace().replace("/", "")
+
         self.robot_base_link = self.get_parameter("robot_base_frame").value
+        self.get_logger().info(f'Using robot base link: {self.robot_base_link}')
+
+        self.mobile_base = {}
+        self.mobile_base["wheel_radius"] = self.get_parameter("mobile_base.wheel_radius").value
+        self.mobile_base["wheel_width"] = self.get_parameter("mobile_base.wheel_width").value
+        self.mobile_base["wheel_x_distance"] = self.get_parameter("mobile_base.wheel_x_distance").value
+        self.mobile_base["wheel_y_distance"] = self.get_parameter("mobile_base.wheel_y_distance").value
+        self.mobile_base["steer_max_vel"] = self.get_parameter("mobile_base.steer_max_vel").value
+        self.mobile_base["steer_min_acc"] = self.get_parameter("mobile_base.steer_min_acc").value
+        self.mobile_base["steer_max_acc"] = self.get_parameter("mobile_base.steer_max_acc").value
+        self.mobile_base["drive_max_vel"] = self.get_parameter("mobile_base.drive_max_vel").value
+        self.mobile_base["drive_min_acc"] = self.get_parameter("mobile_base.drive_min_acc").value
+        self.mobile_base["drive_max_acc"] = self.get_parameter("mobile_base.drive_max_acc").value
+
+        self.get_logger().info(f'Initialized mobile base parameters: {self.mobile_base}')
 
         # publish the module steering angle
         position_controller_name = self.get_parameter("position_controller_name").value
-        steering_angle_publish_topic = "/" + position_controller_name + "/" + "commands"
+        steering_angle_publish_topic = position_controller_name + "/" + "commands"
         self.drive_module_steering_angle_publisher = self.create_publisher(
             Float64MultiArray,
             steering_angle_publish_topic,
@@ -75,7 +103,7 @@ class SwerveController(Node):
 
         # publish the module drive velocity
         velocity_controller_name = self.get_parameter("velocity_controller_name").value
-        velocity_publish_topic = "/" + velocity_controller_name + "/" + "commands"
+        velocity_publish_topic = velocity_controller_name + "/" + "commands"
         self.drive_module_velocity_publisher = self.create_publisher(
             Float64MultiArray,
             velocity_publish_topic,
@@ -109,8 +137,8 @@ class SwerveController(Node):
         # Initialize odom TF 
         zero_odometry = Odometry()
         zero_odometry.header.stamp = self.get_clock().now().to_msg()
-        zero_odometry.header.frame_id = "sobit_home/odom"
-        zero_odometry.child_frame_id = self.robot_base_link
+        zero_odometry.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
+        zero_odometry.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
         zero_odometry.pose.pose.position.x = 0.0
         zero_odometry.pose.pose.position.y = 0.0
         zero_odometry.pose.pose.position.z = 0.0
@@ -230,17 +258,6 @@ class SwerveController(Node):
         self.last_velocity_command_received_at = self.last_recorded_time
 
     def get_drive_modules(self) -> List[DriveModule]:
-        # Get the drive module information from the URDF and turn it into a list of drive modules.
-        #
-        # For now we don't read the URDF and just hard-code the drive modules
-        robot_length = 0.35
-        robot_width = 0.30
-
-        steering_radius = 0.05
-
-        wheel_radius = 0.04
-        wheel_width = 0.05
-
         # store the steering joints
         steering_joint_names = self.get_parameter("steering_joints").value
         steering_joints = []
@@ -265,16 +282,19 @@ class SwerveController(Node):
             name=drive_module_name,
             steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
             drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            # steering_axis_xy_position=Point(0.5 * (robot_length - 2 * steering_radius), 0.5 * (robot_width - steering_radius), 0.0),
-            steering_axis_xy_position=Point(0.35355339/2, 0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
-            wheel_radius=wheel_radius,
-            wheel_width=wheel_width,
-            steering_motor_maximum_velocity=10.0,
-            steering_motor_minimum_acceleration=0.1,
-            steering_motor_maximum_acceleration=1.0,
-            drive_motor_maximum_velocity=10.0,
-            drive_motor_minimum_acceleration=0.1,
-            drive_motor_maximum_acceleration=1.0
+            steering_axis_xy_position=Point(
+                0.5 * (self.mobile_base["wheel_x_distance"]),
+                0.5 * (self.mobile_base["wheel_y_distance"]),
+                0.0
+            ),
+            wheel_radius=self.mobile_base["wheel_radius"],
+            wheel_width=self.mobile_base["wheel_width"],
+            steering_motor_maximum_velocity=self.mobile_base["steer_max_vel"],
+            steering_motor_minimum_acceleration=self.mobile_base["steer_min_acc"],
+            steering_motor_maximum_acceleration=self.mobile_base["steer_max_acc"],
+            drive_motor_maximum_velocity=self.mobile_base["drive_max_vel"],
+            drive_motor_minimum_acceleration=self.mobile_base["drive_min_acc"],
+            drive_motor_maximum_acceleration=self.mobile_base["drive_max_acc"],
         )
         drive_modules.append(left_front)
 
@@ -285,21 +305,52 @@ class SwerveController(Node):
             f'and position: ["{left_front.steering_axis_xy_position.x}", "{left_front.steering_axis_xy_position.y}"]'
         )
 
+        drive_module_name = "f_r"  # TODO: parameterize this
+        right_front = DriveModule(
+            name=drive_module_name,
+            steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
+            drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
+            steering_axis_xy_position=Point(
+                0.5 * (self.mobile_base["wheel_x_distance"]),
+                -0.5 * (self.mobile_base["wheel_y_distance"]),
+                0.0
+            ),
+            wheel_radius=self.mobile_base["wheel_radius"],
+            wheel_width=self.mobile_base["wheel_width"],
+            steering_motor_maximum_velocity=self.mobile_base["steer_max_vel"],
+            steering_motor_minimum_acceleration=self.mobile_base["steer_min_acc"],
+            steering_motor_maximum_acceleration=self.mobile_base["steer_max_acc"],
+            drive_motor_maximum_velocity=self.mobile_base["drive_max_vel"],
+            drive_motor_minimum_acceleration=self.mobile_base["drive_min_acc"],
+            drive_motor_maximum_acceleration=self.mobile_base["drive_max_acc"],
+        )
+        drive_modules.append(right_front)
+
+        self.get_logger().info(
+            f'Configured drive module: "{right_front.name}" ' +
+            f'with steering link: "{right_front.steering_link_name}" ' +
+            f'and drive link: "{right_front.driving_link_name}" ' +
+            f'and position: ["{right_front.steering_axis_xy_position.x}", "{right_front.steering_axis_xy_position.y}"]'
+        )
+
         drive_module_name = "b_l"  # TODO: parameterize this
         left_rear = DriveModule(
             name=drive_module_name,
             steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
             drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            # steering_axis_xy_position=Point(-0.5 * (robot_length - 2 * steering_radius), 0.5 * (robot_width - steering_radius), 0.0),
-            steering_axis_xy_position=Point(-0.35355339/2, 0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
-            wheel_radius=wheel_radius,
-            wheel_width=wheel_width,
-            steering_motor_maximum_velocity=10.0,
-            steering_motor_minimum_acceleration=0.1,
-            steering_motor_maximum_acceleration=1.0,
-            drive_motor_maximum_velocity=10.0,
-            drive_motor_minimum_acceleration=0.1,
-            drive_motor_maximum_acceleration=1.0
+            steering_axis_xy_position=Point(
+                -0.5 * (self.mobile_base["wheel_x_distance"]),
+                0.5 * (self.mobile_base["wheel_y_distance"]),
+                0.0
+            ),
+            wheel_radius=self.mobile_base["wheel_radius"],
+            wheel_width=self.mobile_base["wheel_width"],
+            steering_motor_maximum_velocity=self.mobile_base["steer_max_vel"],
+            steering_motor_minimum_acceleration=self.mobile_base["steer_min_acc"],
+            steering_motor_maximum_acceleration=self.mobile_base["steer_max_acc"],
+            drive_motor_maximum_velocity=self.mobile_base["drive_max_vel"],
+            drive_motor_minimum_acceleration=self.mobile_base["drive_min_acc"],
+            drive_motor_maximum_acceleration=self.mobile_base["drive_max_acc"],
         )
         drive_modules.append(left_rear)
 
@@ -315,16 +366,19 @@ class SwerveController(Node):
             name=drive_module_name,
             steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
             drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            # steering_axis_xy_position=Point(-0.5 * (robot_length - 2 * steering_radius), -0.5 * (robot_width - steering_radius), 0.0),
-            steering_axis_xy_position=Point(-0.35355339/2, -0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
-            wheel_radius=wheel_radius,
-            wheel_width=wheel_width,
-            steering_motor_maximum_velocity=10.0,
-            steering_motor_minimum_acceleration=0.1,
-            steering_motor_maximum_acceleration=1.0,
-            drive_motor_maximum_velocity=10.0,
-            drive_motor_minimum_acceleration=0.1,
-            drive_motor_maximum_acceleration=1.0
+            steering_axis_xy_position=Point(
+                -0.5 * (self.mobile_base["wheel_x_distance"]),
+                -0.5 * (self.mobile_base["wheel_y_distance"]),
+                0.0
+            ),
+            wheel_radius=self.mobile_base["wheel_radius"],
+            wheel_width=self.mobile_base["wheel_width"],
+            steering_motor_maximum_velocity=self.mobile_base["steer_max_vel"],
+            steering_motor_minimum_acceleration=self.mobile_base["steer_min_acc"],
+            steering_motor_maximum_acceleration=self.mobile_base["steer_max_acc"],
+            drive_motor_maximum_velocity=self.mobile_base["drive_max_vel"],
+            drive_motor_minimum_acceleration=self.mobile_base["drive_min_acc"],
+            drive_motor_maximum_acceleration=self.mobile_base["drive_max_acc"],
         )
         drive_modules.append(right_rear)
 
@@ -333,31 +387,6 @@ class SwerveController(Node):
             f'with steering link: "{right_rear.steering_link_name}" ' +
             f'and drive link: "{right_rear.driving_link_name}" ' +
             f'and position: ["{right_rear.steering_axis_xy_position.x}", "{right_rear.steering_axis_xy_position.y}"]'
-        )
-
-        drive_module_name = "f_r"  # TODO: parameterize this
-        right_front = DriveModule(
-            name=drive_module_name,
-            steering_link=next((x for x in steering_joints if drive_module_name in x), "joint_steering_{}".format(drive_module_name)),
-            drive_link=next((x for x in drive_joints if drive_module_name in x), "joint_drive_{}".format(drive_module_name)),
-            # steering_axis_xy_position=Point(0.5 * (robot_length - 2 * steering_radius), -0.5 * (robot_width - steering_radius), 0.0),
-            steering_axis_xy_position=Point(0.35355339/2, -0.35355339/2, 0.0),  # TODO: parameterize this or get from URDF
-            wheel_radius=wheel_radius,
-            wheel_width=wheel_width,
-            steering_motor_maximum_velocity=10.0,
-            steering_motor_minimum_acceleration=0.1,
-            steering_motor_maximum_acceleration=1.0,
-            drive_motor_maximum_velocity=10.0,
-            drive_motor_minimum_acceleration=0.1,
-            drive_motor_maximum_acceleration=1.0
-        )
-        drive_modules.append(right_front)
-
-        self.get_logger().info(
-            f'Configured drive module: "{right_front.name}" ' +
-            f'with steering link: "{right_front.steering_link_name}" ' +
-            f'and drive link: "{right_front.driving_link_name}" ' +
-            f'and position: ["{right_front.steering_axis_xy_position.x}", "{right_front.steering_axis_xy_position.y}"]'
         )
 
         return drive_modules
@@ -458,8 +487,8 @@ class SwerveController(Node):
 
         msg = Odometry()
         msg.header.stamp = self.last_recorded_time.to_msg()
-        msg.header.frame_id = "sobit_home/odom"
-        msg.child_frame_id = self.robot_base_link
+        msg.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
+        msg.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
         msg.pose.pose.position.x = body_state.position_in_world_coordinates.x
         msg.pose.pose.position.y = body_state.position_in_world_coordinates.y
         msg.pose.pose.position.z = body_state.position_in_world_coordinates.z
@@ -491,8 +520,8 @@ class SwerveController(Node):
     def send_odom_transform(self, odometry_msg: Odometry):
         transform = TransformStamped()
         transform.header.stamp = odometry_msg.header.stamp
-        transform.header.frame_id = "sobit_home/odom"
-        transform.child_frame_id = self.robot_base_link
+        transform.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
+        transform.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
         transform.transform.translation.x = odometry_msg.pose.pose.position.x
         transform.transform.translation.y = odometry_msg.pose.pose.position.y
         transform.transform.translation.z = odometry_msg.pose.pose.position.z
@@ -506,8 +535,8 @@ class SwerveController(Node):
         tf_static_broadcaster = StaticTransformBroadcaster(self)
         transform = TransformStamped()
         transform.header.stamp = self.get_clock().now().to_msg()
-        transform.header.frame_id = "sobit_home/odom"
-        transform.child_frame_id = self.robot_base_link
+        transform.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
+        transform.child_frame_id = self.node_namespace + "/" +  self.robot_base_link if self.node_namespace != "" else self.robot_base_link
         transform.transform.translation.x = 0.0
         transform.transform.translation.y = 0.0
         transform.transform.translation.z = 0.0
@@ -572,7 +601,7 @@ class SwerveController(Node):
         drive_velocity_values = []
         for a in drive_module_states:
             linear_velocity = a.drive_velocity_in_meters_per_second
-            wheel_radius = next((x.wheel_radius for x in self.drive_modules if x.name == a.name), 1.0)
+            wheel_radius = self.mobile_base["wheel_radius"]
             drive_velocity_values.append(linear_velocity / wheel_radius)
 
         velocity_msg = Float64MultiArray()
