@@ -181,6 +181,11 @@ class SwerveController(Node):
         # keep last position message to avoid inf value in steering angle data
         self.last_position_msg: Float64MultiArray = None
 
+        # Last drive velocity command actually published, per module (rad/s). Used to slew-rate
+        # limit the drive command so a step change in cmd_vel doesn't step the motor setpoint.
+        # None until the first control cycle, when it seeds to the first (gated) command.
+        self.prev_drive_velocity_values: List[float] = None
+
         # Create the timer that is used to ensure that we publish movement data regularly
         self.cycle_time_in_hertz = self.get_parameter("cycle_fequency").value
         self.get_logger().info(
@@ -632,6 +637,23 @@ class SwerveController(Node):
 
         if steering_state != 1:
             drive_velocity_values = [0.0 for _ in drive_velocity_values]
+
+        # Slew-rate limit the (already gated) drive command. JointGroupVelocityController is a pure
+        # forwarder, so without this a step in cmd_vel becomes a step in the motor setpoint -> current
+        # spike / wheel slip. Clamp each module's per-tick change to drive_max_acc [rad/s^2] / cycle
+        # frequency. Applied AFTER the gate so a stop (gate -> 0) ramps down smoothly; prev tracks the
+        # value actually published so a resume continues from where the ramp left off.
+        max_drive_velocity_step = self.mobile_base["drive_max_acc"] / self.cycle_time_in_hertz
+        if self.prev_drive_velocity_values is None:
+            self.prev_drive_velocity_values = list(drive_velocity_values)
+        else:
+            for i in range(len(drive_velocity_values)):
+                delta = drive_velocity_values[i] - self.prev_drive_velocity_values[i]
+                if delta > max_drive_velocity_step:
+                    drive_velocity_values[i] = self.prev_drive_velocity_values[i] + max_drive_velocity_step
+                elif delta < -max_drive_velocity_step:
+                    drive_velocity_values[i] = self.prev_drive_velocity_values[i] - max_drive_velocity_step
+        self.prev_drive_velocity_values = list(drive_velocity_values)
 
         position_msg = Float64MultiArray()
         position_msg.data = steering_angle_values
