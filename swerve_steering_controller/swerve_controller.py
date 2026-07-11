@@ -67,6 +67,11 @@ class SwerveController(Node):
 
         self.last_velocity_command: Twist = None
 
+        # Set True once we have received a real joint_states message, so that the timer doesn't
+        # command steer angles based on the initial (zeroed) drive module state and cause the
+        # steer to jump from the robot's actual angle to 0.0 on the first command.
+        self.received_joint_states = False
+
         self.node_namespace = self.get_namespace().replace("/", "")
 
         self.enable_tf_prefix = self.get_parameter("enable_tf_prefix").value
@@ -476,6 +481,7 @@ class SwerveController(Node):
         self.store_time_and_update_controller_time()
         self.controller.on_state_update(measured_drive_states)
         self.last_drive_module_state = measured_drive_states
+        self.received_joint_states = True
 
     def publish_odometry(self):
         body_state = self.controller.body_state_at_current_time()
@@ -553,6 +559,12 @@ class SwerveController(Node):
 
         # always send out the odometry information
         self.publish_odometry()
+
+        # Don't command steer angles until we have a real measured steer angle for each module,
+        # otherwise the goal steer selection would be based on the initial (zeroed) state and could
+        # jump the steer from the robot's actual angle to 0.0 on the first command.
+        if not self.received_joint_states:
+            return
 
         # Nothing to command yet if we haven't received a twist.
         if self.last_velocity_command is None:
