@@ -612,7 +612,11 @@ class SwerveController(Node):
         steering_state = 1
         for i in range(len(steering_angle_values)):
             current_steer = self.last_drive_module_state[i].orientation_in_body_coordinates.z
-            err = abs(steering_angle_values[i] - current_steer)
+            # Use the wraparound-aware angular difference: goal is normalized to [-pi, pi]
+            # while the measured steer can sit near the opposite wrap boundary, so a raw
+            # subtraction would report a ~2*pi error for what is really a settled wheel and
+            # the gate would keep the drives at 0 forever.
+            err = abs(difference_between_angles(current_steer, steering_angle_values[i]))
             if steering_state != -1:
                 if err > (self.driving_status_threshold + steer_max_vel / self.cycle_time_in_hertz):
                     steering_state = -1
