@@ -43,6 +43,7 @@ class SwerveController(Node):
         # Declare all parameters
         self.declare_parameter("robot_base_frame", "base_footprint")
         self.declare_parameter("twist_topic", "cmd_vel")
+        self.declare_parameter("enable_tf_prefix", False)
 
         self.declare_parameter("position_controller_name", "position_controller")
         self.declare_parameter("velocity_controller_name", "velocity_controller")
@@ -68,8 +69,14 @@ class SwerveController(Node):
 
         self.node_namespace = self.get_namespace().replace("/", "")
 
+        self.enable_tf_prefix = self.get_parameter("enable_tf_prefix").value
+
         self.robot_base_link = self.get_parameter("robot_base_frame").value
         self.get_logger().info(f'Using robot base link: {self.robot_base_link}')
+
+        prefix = (self.node_namespace + "/") if (self.enable_tf_prefix and self.node_namespace != "") else ""
+        self.odom_frame = prefix + "odom"
+        self.base_frame = prefix + self.robot_base_link
 
         self.mobile_base = {}
         self.mobile_base["wheel_radius"] = self.get_parameter("mobile_base.wheel_radius").value
@@ -137,8 +144,8 @@ class SwerveController(Node):
         # Initialize odom TF 
         zero_odometry = Odometry()
         zero_odometry.header.stamp = self.get_clock().now().to_msg()
-        zero_odometry.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        zero_odometry.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        zero_odometry.header.frame_id = self.odom_frame
+        zero_odometry.child_frame_id = self.base_frame
         zero_odometry.pose.pose.position.x = 0.0
         zero_odometry.pose.pose.position.y = 0.0
         zero_odometry.pose.pose.position.z = 0.0
@@ -487,8 +494,8 @@ class SwerveController(Node):
 
         msg = Odometry()
         msg.header.stamp = self.last_recorded_time.to_msg()
-        msg.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        msg.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        msg.header.frame_id = self.odom_frame
+        msg.child_frame_id = self.base_frame
         msg.pose.pose.position.x = body_state.position_in_world_coordinates.x
         msg.pose.pose.position.y = body_state.position_in_world_coordinates.y
         msg.pose.pose.position.z = body_state.position_in_world_coordinates.z
@@ -520,8 +527,8 @@ class SwerveController(Node):
     def send_odom_transform(self, odometry_msg: Odometry):
         transform = TransformStamped()
         transform.header.stamp = odometry_msg.header.stamp
-        transform.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        transform.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        transform.header.frame_id = self.odom_frame
+        transform.child_frame_id = self.base_frame
         transform.transform.translation.x = odometry_msg.pose.pose.position.x
         transform.transform.translation.y = odometry_msg.pose.pose.position.y
         transform.transform.translation.z = odometry_msg.pose.pose.position.z
@@ -535,8 +542,8 @@ class SwerveController(Node):
         tf_static_broadcaster = StaticTransformBroadcaster(self)
         transform = TransformStamped()
         transform.header.stamp = self.get_clock().now().to_msg()
-        transform.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        transform.child_frame_id = self.node_namespace + "/" +  self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        transform.header.frame_id = self.odom_frame
+        transform.child_frame_id = self.base_frame
         transform.transform.translation.x = 0.0
         transform.transform.translation.y = 0.0
         transform.transform.translation.z = 0.0
