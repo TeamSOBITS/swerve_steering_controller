@@ -16,7 +16,7 @@ from typing import Mapping, List, Tuple
 
 # locals
 from swerve_steering_controller.errors import InvalidTimeFractionException
-from swerve_steering_controller.profile import InvalidTimeFractionException, SingleVariableSCurveProfile
+from swerve_steering_controller.profile import SingleVariableSCurveProfile
 
 # SingleVariableSCurveProfile
 
