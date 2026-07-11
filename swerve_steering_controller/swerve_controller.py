@@ -47,6 +47,7 @@ class SwerveController(Node):
         self.declare_parameter("position_controller_name", "position_controller")
         self.declare_parameter("velocity_controller_name", "velocity_controller")
         self.declare_parameter("cycle_fequency", 50)
+        self.declare_parameter("driving_status_threshold", 0.26)
 
         self.declare_parameter("steering_joints", ["joint1", "joint2"])
         self.declare_parameter("drive_joints", ["joint1", "joint2"])
@@ -76,6 +77,8 @@ class SwerveController(Node):
         prefix = (self.node_namespace + "/") if (self.enable_tf_prefix and self.node_namespace != "") else ""
         self.odom_frame = prefix + "odom"
         self.base_frame = prefix + self.robot_base_link
+
+        self.driving_status_threshold = self.get_parameter("driving_status_threshold").value
 
         self.mobile_base = {}
         self.mobile_base["wheel_radius"] = self.get_parameter("mobile_base.wheel_radius").value
@@ -589,6 +592,23 @@ class SwerveController(Node):
             # contact point with the ground. But ROS wants to know the rotational velocity of the wheel
             wheel_radius = self.mobile_base["wheel_radius"]
             drive_velocity_values.append(chosen_drive_velocity_mps / wheel_radius)
+
+        # Steer-settle gate: don't let the drives run until the steer modules have reached (or are
+        # closing in on) their goal angle. Mirrors the 3-state gate in the C++ swerve controller
+        # (main.cpp control_callback): 1 = settled -> drive, 0/-1 = still turning -> hold drive at 0.
+        steer_max_vel = self.mobile_base["steer_max_vel"]
+        steering_state = 1
+        for i in range(len(steering_angle_values)):
+            current_steer = self.last_drive_module_state[i].orientation_in_body_coordinates.z
+            err = abs(steering_angle_values[i] - current_steer)
+            if steering_state != -1:
+                if err > (self.driving_status_threshold + steer_max_vel / self.cycle_time_in_hertz):
+                    steering_state = -1
+                elif err > self.driving_status_threshold:
+                    steering_state = 0
+
+        if steering_state != 1:
+            drive_velocity_values = [0.0 for _ in drive_velocity_values]
 
         position_msg = Float64MultiArray()
         position_msg.data = steering_angle_values
