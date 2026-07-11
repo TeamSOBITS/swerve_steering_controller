@@ -14,7 +14,6 @@ from typing import List
 import math
 import rclpy
 from rclpy.clock import Clock, Time
-from rclpy.duration import Duration as TimeDuration
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from tf2_geometry_msgs import TransformStamped
@@ -30,11 +29,11 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from tf_transformations import quaternion_from_euler
 
-from .control import BodyMotionCommand
+from .control_model import difference_between_angles
 from .drive_module import DriveModule
 from .geometry import Point
 from .profile import SingleVariableLinearProfile, SingleVariableSCurveProfile, TransientVariableProfile
-from .states import DriveModuleMeasuredValues
+from .states import BodyMotion, DriveModuleMeasuredValues
 from .steering_controller import DriveModuleDesiredValuesProfilePoint, ModuleFollowsBodySteeringController
 
 class SwerveController(Node):
@@ -245,22 +244,8 @@ class SwerveController(Node):
             f'Received a Twist message that is different from the last command. Processing message: "{msg}"'
         )
 
-        # When we get a stream of command it is possible that each command is slightly different (looking at you ROS2 nav)
-        # This means we reset the starting time of the change profile each time, which starts the process all over
-        # Because we don't take the current steering velocity / drive acceleration into account we assume that we
-        # start from rest. That is wrong. We should be starting from a place where we have the current
-        # steering velocity / drive acceleration.
-
-        self.store_time_and_update_controller_time()
-        self.controller.on_desired_state_update(
-            BodyMotionCommand(
-                1.0, # THIS SHOULD REALLY BE CALCULATED SOME HOW
-                msg.linear.x,
-                msg.linear.y,
-                msg.angular.z
-            )
-        )
-
+        # Just record the latest twist and when it arrived. The timer_callback computes IK directly
+        # from this latest twist on every tick (stateless), so there is no profile to (re)build here.
         self.last_velocity_command = msg
         self.last_velocity_command_received_at = self.last_recorded_time
 
@@ -566,50 +551,47 @@ class SwerveController(Node):
         # always send out the odometry information
         self.publish_odometry()
 
-        # Check if we actually have a movement profile to send
-        current_time = self.get_clock().now()
-        trajectory_running_duration: TimeDuration = current_time - self.last_velocity_command_received_at
-        # self.get_logger().debug(
-        #     'Current trajectory duration {} s. Based on current time {} and sequence start time {}'.format(
-        #         trajectory_running_duration,
-        #         current_time,
-        #         self.last_velocity_command_received_at
-        #     )
-        # )
-
-        running_duration_as_float: float = trajectory_running_duration.nanoseconds * 1e-9
-        # self.get_logger().debug(
-        #     'Current trajectory duration {} s'.format(running_duration_as_float)
-        # )
-
-        if running_duration_as_float > self.controller.min_time_for_profile:
-            # self.get_logger().debug(
-            #     'Trajectory completed waiting for next command.'
-            # )
+        # Nothing to command yet if we haven't received a twist.
+        if self.last_velocity_command is None:
             return
 
-        next_time_step = current_time.nanoseconds * 1e-9 + 1.0 / self.cycle_time_in_hertz
-        # self.get_logger().debug(
-        #     'Calculating next step in profile at time {} s'.format(next_time_step)
-        # )
+        # Stateless direct IK: compute the desired module states from the latest twist on every
+        # tick. No profile is built or restarted here, so streamed cmd_vel (e.g. from Nav2) doesn't
+        # cause per-tick ramp restarts.
+        twist = self.last_velocity_command
+        body_motion = BodyMotion(
+            twist.linear.x, twist.linear.y, twist.angular.z,
+            0, 0, 0,
+            0, 0, 0)
+        module_options = self.controller.control_model.state_of_wheel_modules_from_body_motion(body_motion)
 
-        drive_module_states = self.controller.drive_module_state_at_future_time(next_time_step)
+        steering_angle_values = []
+        drive_velocity_values = []
+        for i, (forward_state, reverse_state) in enumerate(module_options):
+            current_steer = self.last_drive_module_state[i].orientation_in_body_coordinates.z
 
-        # Only publish movement commands if there is a trajectory
-        if len(drive_module_states) == 0:
-            return
+            forward_diff = difference_between_angles(current_steer, forward_state.steering_angle_in_radians)
+            reverse_diff = difference_between_angles(current_steer, reverse_state.steering_angle_in_radians)
+
+            chosen_state = forward_state if abs(forward_diff) <= abs(reverse_diff) else reverse_state
+
+            if math.isinf(chosen_state.steering_angle_in_radians):
+                # Zero-velocity case: hold the current measured steer angle, drive at 0.
+                chosen_steer_angle = current_steer
+                chosen_drive_velocity_mps = 0.0
+            else:
+                chosen_steer_angle = chosen_state.steering_angle_in_radians
+                chosen_drive_velocity_mps = chosen_state.drive_velocity_in_meters_per_second
+
+            steering_angle_values.append(chosen_steer_angle)
+
+            # The IK gives the velocity in meters per second, i.e. the velocity of the wheel at the
+            # contact point with the ground. But ROS wants to know the rotational velocity of the wheel
+            wheel_radius = self.mobile_base["wheel_radius"]
+            drive_velocity_values.append(chosen_drive_velocity_mps / wheel_radius)
 
         position_msg = Float64MultiArray()
-        steering_angle_values = [a.steering_angle_in_radians for a in drive_module_states]
         position_msg.data = steering_angle_values
-
-        # Note that the controller gives the velocity in meters per second, i.e. the velocity of the wheel at the
-        # contact point with the ground. But ROS wants to know the rotational velocity of the wheel
-        drive_velocity_values = []
-        for a in drive_module_states:
-            linear_velocity = a.drive_velocity_in_meters_per_second
-            wheel_radius = self.mobile_base["wheel_radius"]
-            drive_velocity_values.append(linear_velocity / wheel_radius)
 
         velocity_msg = Float64MultiArray()
         velocity_msg.data = drive_velocity_values
