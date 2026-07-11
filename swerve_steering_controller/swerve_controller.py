@@ -595,7 +595,14 @@ class SwerveController(Node):
                 chosen_steer_angle = current_steer
                 chosen_drive_velocity_mps = 0.0
             else:
-                chosen_steer_angle = chosen_state.steering_angle_in_radians
+                # The IK returns the goal normalized to [-pi, pi], but the measured steer joint
+                # position is continuous and may sit near the opposite wrap boundary (or beyond
+                # +/-pi for a free-spinning joint). Publishing the raw normalized goal would make
+                # the position controller travel the long way around (up to ~2*pi). Unwrap the
+                # goal to the representation nearest the current measured angle so the controller
+                # always takes the short path.
+                chosen_steer_angle = current_steer + difference_between_angles(
+                    current_steer, chosen_state.steering_angle_in_radians)
                 chosen_drive_velocity_mps = chosen_state.drive_velocity_in_meters_per_second
 
             steering_angle_values.append(chosen_steer_angle)
