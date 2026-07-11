@@ -5,10 +5,14 @@
 
     twist_topic: cmd_vel
 
+    enable_tf_prefix: false
+
     position_controller_name: wheel_steer_position_controller
     velocity_controller_name: wheel_drive_velocity_controller
 
     cycle_fequency: 50
+
+    driving_status_threshold: 0.26  # [rad] steer settle tolerance before drives engage
 
     steering_joints:
       - wheel_steer_f_l_joint
