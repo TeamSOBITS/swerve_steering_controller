@@ -14,7 +14,6 @@ from typing import List
 import math
 import rclpy
 from rclpy.clock import Clock, Time
-from rclpy.duration import Duration as TimeDuration
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from tf2_geometry_msgs import TransformStamped
@@ -30,11 +29,11 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from tf_transformations import quaternion_from_euler
 
-from .control import BodyMotionCommand
+from .control_model import difference_between_angles
 from .drive_module import DriveModule
 from .geometry import Point
 from .profile import SingleVariableLinearProfile, SingleVariableSCurveProfile, TransientVariableProfile
-from .states import DriveModuleMeasuredValues
+from .states import BodyMotion, DriveModuleMeasuredValues
 from .steering_controller import DriveModuleDesiredValuesProfilePoint, ModuleFollowsBodySteeringController
 
 class SwerveController(Node):
@@ -43,10 +42,12 @@ class SwerveController(Node):
         # Declare all parameters
         self.declare_parameter("robot_base_frame", "base_footprint")
         self.declare_parameter("twist_topic", "cmd_vel")
+        self.declare_parameter("enable_tf_prefix", False)
 
         self.declare_parameter("position_controller_name", "position_controller")
         self.declare_parameter("velocity_controller_name", "velocity_controller")
         self.declare_parameter("cycle_fequency", 50)
+        self.declare_parameter("driving_status_threshold", 0.26)
 
         self.declare_parameter("steering_joints", ["joint1", "joint2"])
         self.declare_parameter("drive_joints", ["joint1", "joint2"])
@@ -66,10 +67,23 @@ class SwerveController(Node):
 
         self.last_velocity_command: Twist = None
 
+        # Set True once we have received a real joint_states message, so that the timer doesn't
+        # command steer angles based on the initial (zeroed) drive module state and cause the
+        # steer to jump from the robot's actual angle to 0.0 on the first command.
+        self.received_joint_states = False
+
         self.node_namespace = self.get_namespace().replace("/", "")
+
+        self.enable_tf_prefix = self.get_parameter("enable_tf_prefix").value
 
         self.robot_base_link = self.get_parameter("robot_base_frame").value
         self.get_logger().info(f'Using robot base link: {self.robot_base_link}')
+
+        prefix = (self.node_namespace + "/") if (self.enable_tf_prefix and self.node_namespace != "") else ""
+        self.odom_frame = prefix + "odom"
+        self.base_frame = prefix + self.robot_base_link
+
+        self.driving_status_threshold = self.get_parameter("driving_status_threshold").value
 
         self.mobile_base = {}
         self.mobile_base["wheel_radius"] = self.get_parameter("mobile_base.wheel_radius").value
@@ -137,8 +151,8 @@ class SwerveController(Node):
         # Initialize odom TF 
         zero_odometry = Odometry()
         zero_odometry.header.stamp = self.get_clock().now().to_msg()
-        zero_odometry.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        zero_odometry.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        zero_odometry.header.frame_id = self.odom_frame
+        zero_odometry.child_frame_id = self.base_frame
         zero_odometry.pose.pose.position.x = 0.0
         zero_odometry.pose.pose.position.y = 0.0
         zero_odometry.pose.pose.position.z = 0.0
@@ -166,6 +180,11 @@ class SwerveController(Node):
 
         # keep last position message to avoid inf value in steering angle data
         self.last_position_msg: Float64MultiArray = None
+
+        # Last drive velocity command actually published, per module (rad/s). Used to slew-rate
+        # limit the drive command so a step change in cmd_vel doesn't step the motor setpoint.
+        # None until the first control cycle, when it seeds to the first (gated) command.
+        self.prev_drive_velocity_values: List[float] = None
 
         # Create the timer that is used to ensure that we publish movement data regularly
         self.cycle_time_in_hertz = self.get_parameter("cycle_fequency").value
@@ -238,22 +257,8 @@ class SwerveController(Node):
             f'Received a Twist message that is different from the last command. Processing message: "{msg}"'
         )
 
-        # When we get a stream of command it is possible that each command is slightly different (looking at you ROS2 nav)
-        # This means we reset the starting time of the change profile each time, which starts the process all over
-        # Because we don't take the current steering velocity / drive acceleration into account we assume that we
-        # start from rest. That is wrong. We should be starting from a place where we have the current
-        # steering velocity / drive acceleration.
-
-        self.store_time_and_update_controller_time()
-        self.controller.on_desired_state_update(
-            BodyMotionCommand(
-                1.0, # THIS SHOULD REALLY BE CALCULATED SOME HOW
-                msg.linear.x,
-                msg.linear.y,
-                msg.angular.z
-            )
-        )
-
+        # Just record the latest twist and when it arrived. The timer_callback computes IK directly
+        # from this latest twist on every tick (stateless), so there is no profile to (re)build here.
         self.last_velocity_command = msg
         self.last_velocity_command_received_at = self.last_recorded_time
 
@@ -481,14 +486,15 @@ class SwerveController(Node):
         self.store_time_and_update_controller_time()
         self.controller.on_state_update(measured_drive_states)
         self.last_drive_module_state = measured_drive_states
+        self.received_joint_states = True
 
     def publish_odometry(self):
         body_state = self.controller.body_state_at_current_time()
 
         msg = Odometry()
         msg.header.stamp = self.last_recorded_time.to_msg()
-        msg.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        msg.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        msg.header.frame_id = self.odom_frame
+        msg.child_frame_id = self.base_frame
         msg.pose.pose.position.x = body_state.position_in_world_coordinates.x
         msg.pose.pose.position.y = body_state.position_in_world_coordinates.y
         msg.pose.pose.position.z = body_state.position_in_world_coordinates.z
@@ -520,8 +526,8 @@ class SwerveController(Node):
     def send_odom_transform(self, odometry_msg: Odometry):
         transform = TransformStamped()
         transform.header.stamp = odometry_msg.header.stamp
-        transform.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        transform.child_frame_id = self.node_namespace + "/" + self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        transform.header.frame_id = self.odom_frame
+        transform.child_frame_id = self.base_frame
         transform.transform.translation.x = odometry_msg.pose.pose.position.x
         transform.transform.translation.y = odometry_msg.pose.pose.position.y
         transform.transform.translation.z = odometry_msg.pose.pose.position.z
@@ -535,8 +541,8 @@ class SwerveController(Node):
         tf_static_broadcaster = StaticTransformBroadcaster(self)
         transform = TransformStamped()
         transform.header.stamp = self.get_clock().now().to_msg()
-        transform.header.frame_id = self.node_namespace + "/odom" if self.node_namespace != "" else "odom"
-        transform.child_frame_id = self.node_namespace + "/" +  self.robot_base_link if self.node_namespace != "" else self.robot_base_link
+        transform.header.frame_id = self.odom_frame
+        transform.child_frame_id = self.base_frame
         transform.transform.translation.x = 0.0
         transform.transform.translation.y = 0.0
         transform.transform.translation.z = 0.0
@@ -559,50 +565,98 @@ class SwerveController(Node):
         # always send out the odometry information
         self.publish_odometry()
 
-        # Check if we actually have a movement profile to send
-        current_time = self.get_clock().now()
-        trajectory_running_duration: TimeDuration = current_time - self.last_velocity_command_received_at
-        # self.get_logger().debug(
-        #     'Current trajectory duration {} s. Based on current time {} and sequence start time {}'.format(
-        #         trajectory_running_duration,
-        #         current_time,
-        #         self.last_velocity_command_received_at
-        #     )
-        # )
-
-        running_duration_as_float: float = trajectory_running_duration.nanoseconds * 1e-9
-        # self.get_logger().debug(
-        #     'Current trajectory duration {} s'.format(running_duration_as_float)
-        # )
-
-        if running_duration_as_float > self.controller.min_time_for_profile:
-            # self.get_logger().debug(
-            #     'Trajectory completed waiting for next command.'
-            # )
+        # Don't command steer angles until we have a real measured steer angle for each module,
+        # otherwise the goal steer selection would be based on the initial (zeroed) state and could
+        # jump the steer from the robot's actual angle to 0.0 on the first command.
+        if not self.received_joint_states:
             return
 
-        next_time_step = current_time.nanoseconds * 1e-9 + 1.0 / self.cycle_time_in_hertz
-        # self.get_logger().debug(
-        #     'Calculating next step in profile at time {} s'.format(next_time_step)
-        # )
-
-        drive_module_states = self.controller.drive_module_state_at_future_time(next_time_step)
-
-        # Only publish movement commands if there is a trajectory
-        if len(drive_module_states) == 0:
+        # Nothing to command yet if we haven't received a twist.
+        if self.last_velocity_command is None:
             return
+
+        # Stateless direct IK: compute the desired module states from the latest twist on every
+        # tick. No profile is built or restarted here, so streamed cmd_vel (e.g. from Nav2) doesn't
+        # cause per-tick ramp restarts.
+        twist = self.last_velocity_command
+        body_motion = BodyMotion(
+            twist.linear.x, twist.linear.y, twist.angular.z,
+            0, 0, 0,
+            0, 0, 0)
+        module_options = self.controller.control_model.state_of_wheel_modules_from_body_motion(body_motion)
+
+        steering_angle_values = []
+        drive_velocity_values = []
+        for i, (forward_state, reverse_state) in enumerate(module_options):
+            current_steer = self.last_drive_module_state[i].orientation_in_body_coordinates.z
+
+            forward_diff = difference_between_angles(current_steer, forward_state.steering_angle_in_radians)
+            reverse_diff = difference_between_angles(current_steer, reverse_state.steering_angle_in_radians)
+
+            chosen_state = forward_state if abs(forward_diff) <= abs(reverse_diff) else reverse_state
+
+            if math.isinf(chosen_state.steering_angle_in_radians):
+                # Zero-velocity case: hold the current measured steer angle, drive at 0.
+                chosen_steer_angle = current_steer
+                chosen_drive_velocity_mps = 0.0
+            else:
+                # The IK returns the goal normalized to [-pi, pi], but the measured steer joint
+                # position is continuous and may sit near the opposite wrap boundary (or beyond
+                # +/-pi for a free-spinning joint). Publishing the raw normalized goal would make
+                # the position controller travel the long way around (up to ~2*pi). Unwrap the
+                # goal to the representation nearest the current measured angle so the controller
+                # always takes the short path.
+                chosen_steer_angle = current_steer + difference_between_angles(
+                    current_steer, chosen_state.steering_angle_in_radians)
+                chosen_drive_velocity_mps = chosen_state.drive_velocity_in_meters_per_second
+
+            steering_angle_values.append(chosen_steer_angle)
+
+            # The IK gives the velocity in meters per second, i.e. the velocity of the wheel at the
+            # contact point with the ground. But ROS wants to know the rotational velocity of the wheel
+            wheel_radius = self.mobile_base["wheel_radius"]
+            drive_velocity_values.append(chosen_drive_velocity_mps / wheel_radius)
+
+        # Steer-settle gate: don't let the drives run until the steer modules have reached (or are
+        # closing in on) their goal angle. Mirrors the 3-state gate in the C++ swerve controller
+        # (main.cpp control_callback): 1 = settled -> drive, 0/-1 = still turning -> hold drive at 0.
+        steer_max_vel = self.mobile_base["steer_max_vel"]
+        steering_state = 1
+        for i in range(len(steering_angle_values)):
+            current_steer = self.last_drive_module_state[i].orientation_in_body_coordinates.z
+            # Use the wraparound-aware angular difference: goal is normalized to [-pi, pi]
+            # while the measured steer can sit near the opposite wrap boundary, so a raw
+            # subtraction would report a ~2*pi error for what is really a settled wheel and
+            # the gate would keep the drives at 0 forever.
+            err = abs(difference_between_angles(current_steer, steering_angle_values[i]))
+            if steering_state != -1:
+                if err > (self.driving_status_threshold + steer_max_vel / self.cycle_time_in_hertz):
+                    steering_state = -1
+                elif err > self.driving_status_threshold:
+                    steering_state = 0
+
+        if steering_state != 1:
+            drive_velocity_values = [0.0 for _ in drive_velocity_values]
+
+        # Slew-rate limit the (already gated) drive command. JointGroupVelocityController is a pure
+        # forwarder, so without this a step in cmd_vel becomes a step in the motor setpoint -> current
+        # spike / wheel slip. Clamp each module's per-tick change to drive_max_acc [rad/s^2] / cycle
+        # frequency. Applied AFTER the gate so a stop (gate -> 0) ramps down smoothly; prev tracks the
+        # value actually published so a resume continues from where the ramp left off.
+        max_drive_velocity_step = self.mobile_base["drive_max_acc"] / self.cycle_time_in_hertz
+        if self.prev_drive_velocity_values is None:
+            self.prev_drive_velocity_values = list(drive_velocity_values)
+        else:
+            for i in range(len(drive_velocity_values)):
+                delta = drive_velocity_values[i] - self.prev_drive_velocity_values[i]
+                if delta > max_drive_velocity_step:
+                    drive_velocity_values[i] = self.prev_drive_velocity_values[i] + max_drive_velocity_step
+                elif delta < -max_drive_velocity_step:
+                    drive_velocity_values[i] = self.prev_drive_velocity_values[i] - max_drive_velocity_step
+        self.prev_drive_velocity_values = list(drive_velocity_values)
 
         position_msg = Float64MultiArray()
-        steering_angle_values = [a.steering_angle_in_radians for a in drive_module_states]
         position_msg.data = steering_angle_values
-
-        # Note that the controller gives the velocity in meters per second, i.e. the velocity of the wheel at the
-        # contact point with the ground. But ROS wants to know the rotational velocity of the wheel
-        drive_velocity_values = []
-        for a in drive_module_states:
-            linear_velocity = a.drive_velocity_in_meters_per_second
-            wheel_radius = self.mobile_base["wheel_radius"]
-            drive_velocity_values.append(linear_velocity / wheel_radius)
 
         velocity_msg = Float64MultiArray()
         velocity_msg.data = drive_velocity_values

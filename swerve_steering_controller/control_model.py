@@ -199,31 +199,9 @@ class SimpleFourWheelSteeringControlModel(ControlModelBase):
                 # In either case we just keep the position of the wheel where it was
                 forward_steering_angle = float('infinity')
             else:
-                # Calculate the position of the drive wheel.
-                #
-                # math.acos returns values between 0 and pi
-                cos_angle = math.acos(v_x / drive_velocity)
-
-                # math.asin returns values between -1/2 pi and 1/2 pi
-                sin_angle = math.asin(v_y / drive_velocity)
-
-                # The acos value decides if the wheel orientation is between 0 - 90 degrees or 90 - 180 degrees, i.e. top and bottom, but
-                # doesn't distinguish between left and right
-                # the asin value decides if the wheel orientation is between 90 - 0 degrees or 360 - 270 degrees, i.e. left and right
-                if cos_angle <= 0.5 * math.pi:
-                    if sin_angle < 0:
-                        forward_steering_angle = sin_angle #+ 2 * math.pi
-                    else:
-                        forward_steering_angle = sin_angle
-                else:
-                    # cos_angle is larger than 1/2 * pi. In that case if the
-                    if sin_angle < 0:
-                        # In this case we want to mirror the current angle relative to Pi (or 180 degrees)
-                        forward_steering_angle = difference_between_angles(cos_angle, math.pi) + math.pi
-                    else:
-                        forward_steering_angle = cos_angle
-
-                forward_steering_angle = normalize_angle(forward_steering_angle)
+                # Calculate the position of the drive wheel using atan2, which
+                # correctly resolves the angle in all four quadrants.
+                forward_steering_angle = normalize_angle(math.atan2(v_y, v_x))
 
             if not math.isinf(forward_steering_angle):
                 reverse_steering_angle = normalize_angle(forward_steering_angle + math.pi)
